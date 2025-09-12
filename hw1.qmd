@@ -1,0 +1,283 @@
+---
+title: "hw1"
+format: pdf
+editor: visual
+---
+
+# Homework 1
+
+## Problem 1
+
+#### (a) Import the data and change column names.
+
+```{r}
+abal<-read.csv("abalone.data",header=FALSE)
+colnames(abal)<-c("sex","len","diam","ht","whole_wt","shu_wt","vis_wt","shel_wt","rings")
+abal
+```
+
+#### (b) Numbers of observations belong to each sex
+
+```{r}
+#| echo: false
+table(abal$sex)
+```
+
+#### (c) correlation
+
+1.From the result below, shell weight has the highest correlation with rings.
+
+```{r}
+weight<-abal[,c("whole_wt","shu_wt","vis_wt","shel_wt")]
+corr<-cor(weight, abal$rings)
+corr
+```
+
+2.As shown below, the infant group has the highest correlation between shell weight and rings.
+
+```{r}
+ab_sex<-c("M","F","I")
+corr_groupby_sex<-sapply(ab_sex,function(x) cor(abal$shel_wt[abal$sex==x],abal$rings[abal$sex==x]))
+print(corr_groupby_sex)
+```
+
+3.Four weights of abalone with the highest rings.
+
+```{r}
+max_ring<-max(abal$rings)
+wt_with_max_ring<-abal[abal$rings==max_ring,c("whole_wt","shu_wt","vis_wt","shel_wt")]
+wt_with_max_ring
+```
+
+4.The percentage of abalones whose viscera weight larger than their shell weight is apprximately 6.51%.
+
+```{r}
+target<-abal[abal$vis_wt>abal$shel_wt,]
+percent<-nrow(target)/nrow(abal)
+percent
+```
+
+#### (d) correlation table group by sex
+
+```{r}
+library(dplyr)
+cor_table <- abal %>%group_by(sex) %>%summarize(
+              whole_wt = cor(whole_wt, rings),
+    shu_wt = cor(shu_wt, rings),
+    vis_wt = cor(vis_wt, rings),
+    shel_wt = cor(shel_wt, rings)
+  )
+
+print(cor_table)
+```
+
+#### (e) t test
+
+1.t test between F&I: p value\<0.05, indicating there are significant difference of rings between female and infant abalones under significance level=0.05
+
+```{r}
+FI <- t.test(rings ~ sex, data = abal, subset = sex %in% c("F", "I"))
+FI
+```
+
+2.t test between F&M p value\<0.05, indicating there are significant difference of rings between female and male abalones under significance level=0.05
+
+```{r}
+FM <- t.test(rings ~ sex, data = abal, subset = sex %in% c("F", "M"))
+FM
+```
+
+3.t test between I&M p value\<0.05, indicating there are significant difference of rings between infant and male abalones under significance level=0.05
+
+```{r}
+IM <- t.test(rings ~ sex, data = abal, subset = sex %in% c("I", "M"))
+IM
+```
+
+## Problem 2
+
+#### (a) Import dataset.
+
+```{r}
+dt<-read.csv("food_expenditure.csv")
+dt
+```
+
+#### (b) Revise Column Names.
+
+```{r}
+colnames(dt)<-c("id","age","fam_meb","state","currency","foodexp","foodexp_gro",
+                "foodexp_dinout","foodexp_mis","dinout_freq","alco_include",
+                "ass_prog")
+
+```
+
+#### (c) Restrict currency to USD.
+
+After resricting currency, the total number of rows reduced to 230.
+
+```{r}
+print(nrow(dt)) #number of observations before restricting the data.
+data<-dt[dt$currency=="USD",]
+print(nrow(data))#number of observations after restricting the data.
+```
+
+#### (d) Age
+
+```{r}
+sum(is.na(data$age))
+```
+
+restricting age \>=18 and eliminating missing values
+
+```{r}
+data1<-data[!is.na(data$age) & data$age>=18,]
+```
+
+#### (e) State
+
+```{r}
+sum(is.na(data1$state))
+```
+
+```{r}
+nrow(data1[data1$state=='XX',])
+```
+
+Eliminate the rows with state='XX' or missing state values
+
+```{r}
+data2<-data1[data1$state!='XX',]
+```
+
+#### (f) Food expenditure
+
+Exlude missing values and the values smaller than or equal to 0.
+
+```{r}
+sum(is.na(data2$foodexp))
+```
+
+```{r}
+sum(is.na(data2$foodexp_dinout))
+```
+
+```{r}
+sum(is.na(data2$foodexp_gro))
+```
+
+```{r}
+sum(is.na(data2$foodexp_mis))
+```
+
+```{r}
+data3<-data2[!is.na(data2$foodexp_dinout) & !is.na(data2$foodexp_gro) &     
+               !is.na(data2$foodexp_mis) & data2$foodexp_dinout>0 & data2$foodexp_gro>0
+              & data2$foodexp_mis>0 & data2$foodexp>0,]
+```
+
+#### (g) Dine-out frequency
+
+eliminate empty values and make sure dinout_freq\>=0
+
+```{r}
+data4<-data3[!is.na(data3$dinout_freq) & data3$dinout_freq>=0,]
+```
+
+#### (h) After filtering, there are 128 valid observations.
+
+```{r}
+nrow(data4)
+```
+
+```{r}
+data4
+```
+
+## Problem 3
+
+#### (a) Build function return collatz number
+
+```{r}
+# Function to give the next collatz
+nextCollatz<-function(x){
+  #inputs: x- an integer
+  #outputs: its next collatz number
+  if (x<1) {return(FALSE)}
+  if (x==1){return(1)}
+  else{
+    if (x%%2==0){return (x/2)}
+    else{return(3*x+1)}
+    }
+  
+  
+}
+```
+
+```{r}
+nextCollatz(5)
+```
+
+```{r}
+nextCollatz(16)
+```
+
+```{r}
+nextCollatz(-1)
+```
+
+#### (b) Build function return collatz sequence
+
+```{r}
+collatzSequence<-function(x){
+  #inputs: x- an integer
+  #outputs: the sequence of collatz number starting at x
+  if (x==1){return(1)}
+  if(x<1){return(FALSE)}
+  if(x>1){
+    res<-c(x)
+    while(x>1){
+      res<-append(res,nextCollatz(x))
+      x<-nextCollatz(x)
+    }
+  return(res)}
+}
+```
+
+```{r}
+collatzSequence(5)
+```
+
+```{r}
+collatzSequence(0)
+```
+
+```{r}
+collatzSequence(100)
+```
+
+#### (c) Finding the longest and shortest sequences
+
+```{r}
+df<-data.frame(start=integer(),len=integer())
+for (i in 100:500){
+  new_row<-data.frame(start=i,len=length(collatzSequence(i)))
+  df <- rbind(df, new_row)
+}
+```
+
+Longest sequence
+
+```{r}
+max_len<-max(df['len'])
+max_row<-df[df$len==max_len,]
+max_row
+```
+
+Shortest sequence
+
+```{r}
+min_len<-min(df['len'])
+min_row<-df[df$len==min_len,]
+min_row
+```
