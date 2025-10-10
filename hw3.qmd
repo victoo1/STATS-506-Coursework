@@ -1,0 +1,426 @@
+---
+title: "hw3"
+format: pdf
+editor: visual
+---
+
+## Problem 1
+
+#### a.
+
+```{r}
+library(haven)
+aux<-read_xpt("AUX_I.xpt")
+demo<-read_xpt("DEMO_I.xpt")
+data<-merge(aux, demo, by = "SEQN") 
+dim(data)
+```
+
+#### b.
+
+```{r}
+#RIAGENDR--GENDER
+#DMDCITZN--Citizenship status
+#DMDHHSZE--Number of children 5 years or younger 
+#INDHHIN2--Annual household income 
+vars<-c("RIAGENDR", "DMDCITZN", "DMDHHSZE", "INDHHIN2")
+data$gender<-factor(data$RIAGENDR,levels = c(1, 2),labels = c("Male", "Female"))
+
+data$citizen_sta<-factor(data$DMDCITZN,levels=c(1,2,7,9),
+             labels=c("citizen","noncitizen",NA,NA))
+data$child_under5<-ordered(data$DMDHHSZE,levels=c(0,1,2,3),labels=c('0','1','2','3 or more'))
+data$house_income<-ordered(data$INDHHIN2,levels=append(1:10,c(12,12,14,15,77,99)),
+                      labels=c('$ 0 to $ 4,999','$ 5,000 to $ 9,999',
+                               '$10,000 to $14,999', '$15,000 to $19,999',
+                               '$20,000 to $24,999','$25,000 to $34,999',
+                               '$35,000 to $44,999','	$45,000 to $54,999',
+                               '$55,000 to $64,999','$65,000 to $74,999',
+                               NA,NA,
+                               '$75,000 to $99,999','$100,000 and Over',
+                               NA,NA))
+```
+
+#### c.
+
+Fit Poisson regression model.
+
+```{r}
+model_1R<-glm(AUXTWIDR~gender,data,family = poisson)
+model_2R<-glm(AUXTWIDR~gender+citizen_sta+child_under5+
+              house_income,data,family=poisson)
+model_1L<-glm(AUXTWIDL~gender,data,family = poisson)
+model_2L<-glm(AUXTWIDL~gender+citizen_sta+child_under5+
+                house_income,data, family=poisson)
+```
+
+
+
+sample size, pseudo-R square, and AIC values
+
+```{r}
+library(knitr)
+library(broom)
+library(tidyverse)
+library(dplyr)
+model_stats<-function(model,name) {
+  pseudo_r2<-1-(model$deviance/model$null.deviance)
+  data.frame(
+    Model=name,
+    N=nobs(model),
+    Pseudo_R2 = round(pseudo_r2,3),
+    AIC = round(AIC(model),1)
+  )
+}
+md_stats<-bind_rows(
+  model_stats(model_1R, "1R"),
+  model_stats(model_2R, "2R"),
+  model_stats(model_1L, "1L"),
+  model_stats(model_2L, "2L")
+)
+kable(md_stats)
+```
+
+IRR
+
+```{r}
+get_irr<-function(model,name) {
+  coef_summary <- summary(model)$coefficients
+  irr<-exp(coef_summary[,"Estimate"])
+  p_values<-coef_summary[,"Pr(>|z|)"]
+  results <- data.frame(
+    model=name,
+    IRR = round(irr,3),
+    p_value = round(p_values,3))
+  return(results)
+}
+irr_table <- bind_rows(
+  get_irr(model_1R,"1R"),
+  get_irr(model_2R,"2R"),
+  get_irr(model_1L,"1L"),
+  get_irr(model_2L,"2L")
+)
+kable(irr_table)
+```
+
+#### d.
+Test for IRR:
+The p-value for genderFemale in model 2L is $8.25*10^{-4}$, which means gender is a significant at α=0.01,and irr greater than 1, means female have more  Tympanometric width measure than male.
+
+```{r}
+res<-summary(model_2L)$coefficients
+irr<-exp(res[,"Estimate"])
+res
+```
+```{r}
+irr
+```
+Test for predicted value:
+since p value<0.01, so reject null hypothesis under α=0.01, predicted value of Tympanometric width measure of the left ear differs between men and women.
+
+```{r}
+data$pred<-predict(model_2L, newdata=data)
+t.test(pred~gender,data=data)
+```
+## Problem 2
+
+Loading data:
+```{r}
+library(microbenchmark)
+library(DBI)
+sakila <- dbConnect(RSQLite::SQLite(), "sakila_master.db")
+dbListTables(sakila)
+```
+#### a.
+###### 1)SQL+R:
+SQL:
+```{r}
+customers<-dbGetQuery(sakila,"
+        SELECT customer_id, store_id, active
+          FROM customer;         
+        ")
+```
+R:
+```{r}
+library(dplyr)
+actcust<- customers %>%
+  group_by(store_id) %>%
+  summarize(
+    n_customers = n(),
+    percent_active =sum(as.integer(active))/n_customers*100
+  ) 
+print(actcust)
+```
+###### 2) Single SQL query
+```{r}
+dbGetQuery(sakila,"
+        SELECT store_id,COUNT(*) AS n_customers,
+               100.0 * SUM( active ) / COUNT(*) AS percent_active
+            FROM customer 
+            GROUP BY store_id;
+")
+```
+###### 3) time comparison
+It seems that using only SQL query is faster.
+```{r}
+bench <- microbenchmark(
+  SQL_R= {
+    customers <- dbGetQuery(sakila, "SELECT customer_id, store_id, active FROM customer")
+    customers %>%
+      group_by(store_id) %>%
+      summarize(n_customers = n(),
+                n_active = sum(as.integer(active)),
+                pct_active = n_active / n_customers * 100)
+  },
+  SQL= {
+        dbGetQuery(sakila,"
+        SELECT store_id,COUNT(*) AS n_customers,
+               100.0 * SUM( active ) / COUNT(*) AS percent_active
+            FROM customer 
+            GROUP BY store_id;
+")
+  },
+  times = 20
+)
+print(bench)
+```
+#### b.
+SQL+Rmethod has relatively shorter time.
+###### 1)SQL+R
+```{r}
+staf<-dbGetQuery(sakila, "
+  SELECT
+    s.staff_id,
+    s.first_name,
+    s.last_name,
+    a.city_id,
+    a.address_id,
+    a.address,
+    c.city,
+    c.country_id
+  FROM staff AS s
+  JOIN address AS a ON s.address_id = a.address_id
+  JOIN city AS c ON a.city_id = c.city_id
+")
+
+ctr<-dbGetQuery(sakila, "
+  SELECT country_id, country
+   FROM country
+")
+staff_info<-staf%>%
+  left_join(ctr, by = "country_id") %>%
+  select(staff_id, first_name, last_name, country)
+staff_info
+```
+###### 2)single SQL
+```{r}
+dbGetQuery(sakila, "
+  SELECT 
+    s.staff_id,
+    s.first_name,
+    s.last_name,
+    a.city_id,
+    ct.city,
+    cr.country_id
+  FROM staff AS s
+  JOIN address AS a ON s.address_id = a.address_id
+  JOIN city AS ct ON a.city_id = ct.city_id
+  JOIN country cr ON ct.country_id = cr.country_id;
+")
+```
+###### 3)
+```{r}
+bench <- microbenchmark(
+  SQL_R= {
+staf<-dbGetQuery(sakila, "
+  SELECT
+    s.staff_id,
+    s.first_name,
+    s.last_name,
+    a.city_id,
+    a.address_id,
+    a.address,
+    c.city,
+    c.country_id
+  FROM staff AS s
+  JOIN address AS a ON s.address_id = a.address_id
+  JOIN city AS c ON a.city_id = c.city_id
+")
+
+ctr<-dbGetQuery(sakila, "
+  SELECT country_id, country
+   FROM country
+")
+staff_info<-staf%>%
+left_join(ctr, by = "country_id") %>%
+select(staff_id, first_name, last_name, country)
+staff_info
+  },
+  SQL= {
+dbGetQuery(sakila, "
+  SELECT 
+    s.staff_id,
+    s.first_name,
+    s.last_name,
+    a.city_id,
+    ct.city,
+    cr.country_id
+  FROM staff AS s
+  JOIN address AS a ON s.address_id = a.address_id
+  JOIN city AS ct ON a.city_id = ct.city_id
+  JOIN country cr ON ct.country_id = cr.country_id;
+")
+  },
+  times = 20
+)
+print(bench)
+```
+
+#### c.
+###### 1)SQL+R
+```{r}
+pay<-dbGetQuery(sakila, "SELECT payment_id, rental_id, amount FROM payment")
+rent<-dbGetQuery(sakila, "SELECT rental_id, inventory_id FROM rental")
+inv <-dbGetQuery(sakila, "SELECT inventory_id, film_id FROM inventory")
+film<-dbGetQuery(sakila, "SELECT film_id, title FROM film")
+library(dplyr)
+revenue<-pay%>%
+  left_join(rent,by="rental_id")%>%
+  left_join(inv,by="inventory_id") %>%
+  left_join(film,by="film_id") %>%
+  group_by(film_id,title) %>%
+  summarize(total_revenue=sum(amount,na.rm=TRUE))
+max_revenue <- max(revenue$total_revenue, na.rm = TRUE)
+top<-revenue %>%
+  filter(total_revenue==max_revenue)
+print(top)
+
+
+```
+
+
+###### 2)SQL
+`
+```{r}
+dbGetQuery(sakila,'
+       SELECT f.title, SUM(p.amount) AS total_revenue
+         FROM film f
+          JOIN inventory i ON f.film_id = i.film_id
+          JOIN rental r ON i.inventory_id = r.inventory_id
+          JOIN payment p ON r.rental_id = p.rental_id
+        GROUP BY f.film_id, f.title
+        HAVING total_revenue = (SELECT MAX(total) FROM (SELECT SUM(p.amount) AS total 
+        FROM payment p 
+        JOIN rental r ON p.rental_id = r.rental_id 
+        JOIN inventory i ON r.inventory_id = i.inventory_id 
+        GROUP BY i.film_id) AS sub);')
+```
+
+###### 3)
+It seems that SQL+R method is more efficient.
+
+```{r}
+bench <- microbenchmark(
+  SQL_R= {
+    pay<-dbGetQuery(sakila, "SELECT payment_id, rental_id, amount FROM payment")
+   rent<-dbGetQuery(sakila, "SELECT rental_id, inventory_id FROM rental")
+   inv <-dbGetQuery(sakila, "SELECT inventory_id, film_id FROM inventory")
+   film<-dbGetQuery(sakila, "SELECT film_id, title FROM film")
+   library(dplyr)
+   revenue<-pay%>%
+  left_join(rent,by="rental_id")%>%
+  left_join(inv,by="inventory_id") %>%
+  left_join(film,by="film_id") %>%
+  group_by(film_id,title) %>%
+  summarize(total_revenue=sum(amount,na.rm=TRUE))
+  max_revenue <- max(revenue$total_revenue, na.rm = TRUE)
+  top<-revenue %>%
+    filter(total_revenue==max_revenue)
+  },
+  SQL= {
+        dbGetQuery(sakila,'
+       SELECT f.title, SUM(p.amount) AS total_revenue
+         FROM film f
+          JOIN inventory i ON f.film_id = i.film_id
+          JOIN rental r ON i.inventory_id = r.inventory_id
+          JOIN payment p ON r.rental_id = p.rental_id
+        GROUP BY f.film_id, f.title
+        HAVING total_revenue = (SELECT MAX(total) FROM (SELECT SUM(p.amount) AS total 
+        FROM payment p 
+        JOIN rental r ON p.rental_id = r.rental_id 
+        JOIN inventory i ON r.inventory_id = i.inventory_id 
+        GROUP BY i.film_id) AS sub);')
+  },
+  times = 20
+)
+print(bench)
+```
+
+
+
+## Problem 3
+#### a.
+```{r}
+data<-read.csv("au_500.csv")
+data
+
+```
+```{r}
+com_web<-grepl("\\.com$",data$web,ignore.case=TRUE)
+percent_com<-mean(com_web, na.rm = TRUE)
+percent_com
+```
+#### b.
+```{r}
+# 提取电子邮件域名
+email_domains <- sub(".*@", "", data$email)
+
+# 找出频率最高的域名
+domain_freq <- sort(table(email_domains), decreasing = TRUE)
+cat("最常见的电子邮件域名是：", names(domain_freq)[1], "（共", domain_freq[1], "个）\n")
+
+```
+#### c.
+```{r}
+# 移除空格和逗号后检查是否有非字母字符
+name_cleaned <- gsub("[ ,]", "", data$company_name)
+
+# 含有非字母字符的公司名
+non_alpha <- grepl("[^A-Za-z]", name_cleaned)
+proportion_non_alpha <- mean(non_alpha) * 100
+cat("包含非字母字符（不含逗号、空格）的公司名称比例：", round(proportion_non_alpha, 2), "%\n")
+
+# 如果也排除 & 字符
+name_cleaned2 <- gsub("[ ,&]", "", data$company_name)
+non_alpha2 <- grepl("[^A-Za-z]", name_cleaned2)
+proportion_non_alpha2 <- mean(non_alpha2) * 100
+cat("包含非字母字符（不含逗号、空格、&）的公司名称比例：", round(proportion_non_alpha2, 2), "%\n")
+
+```
+#### d.
+```{r}
+# 创建格式化函数
+fmt_phone <- function(ph) {
+  # 去掉非数字字符
+  dig <- str_replace_all(ph, "[^0-9]", "")
+  # 若长度不是 10，则返回 NA 或原样
+  if (nchar(dig) != 10) {
+    return(NA)
+  }
+  # 切分：前 4，次 3，后 3
+  p1 <- substr(dig, 1, 4)
+  p2 <- substr(dig, 5, 7)
+  p3 <- substr(dig, 8, 10)
+  return(paste(p1, p2, p3, sep = "-"))
+}
+
+data$phone1_fmt <- vapply(data$phone1, fmt_phone, FUN.VALUE = character(1))
+data$phone2_fmt <- vapply(data$phone2, fmt_phone, FUN.VALUE = character(1))
+
+# 打印前 10
+head(data$phone1_fmt, 10)
+head(data$phone2_fmt, 10)
+
+
+```
+
+
