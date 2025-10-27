@@ -1,0 +1,184 @@
+---
+title: "Homework 4"
+format: pdf
+editor: visual
+---
+
+## Problem 1
+
+```{r}
+library(tidyverse)
+library(nzelect)
+data(nzge)
+```
+
+#### (a)
+
+```{r}
+#| echo: false
+resulta<-nzge %>%
+  group_by(election_year,voting_type) %>%
+  summarise(count=sum(votes)) %>%
+  arrange(count) %>%
+  ungroup()
+print(resulta)
+```
+
+#### (b)
+
+```{r}
+resultb<-nzge %>%
+  filter(election_year=='2014') %>%
+  group_by(party) %>%
+  summarise(votesum=sum(votes)) %>%
+  mutate(percent=votesum/sum(votesum)*100) %>%
+  select(!votesum) %>%
+  arrange(desc(percent))
+print(resultb)
+```
+
+#### (c)
+
+```{r}
+resultc<-nzge %>%
+  group_by(election_year,voting_type,party) %>%
+  summarise(total=sum(votes)) %>%
+  group_by(election_year,voting_type) %>%
+  slice_max(order_by=desc(total),n=1,with_ties = FALSE) %>%
+  ungroup()%>%
+    select(!total) %>%
+  pivot_wider(
+    names_from = voting_type,
+    values_from = party,
+    names_prefix = "Winner_"
+  ) %>%
+  arrange(election_year)
+print(resultc)
+```
+
+## Problem 2
+
+Load the data
+
+```{r}
+tennis<-readr::read_delim("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/refs/heads/master/atp_matches_2019.csv")
+```
+
+#### (a)
+
+There are 125 tournments took place in 2019.
+
+```{r}
+tour_2019<- tennis %>%
+  filter(tourney_date>=20190000) %>%
+  distinct(tourney_id, tourney_name, tourney_date) %>%
+  count()
+print(as.numeric(tour_2019))
+```
+
+#### (b)
+
+Yes. There are 25 players won more than 1 game.
+
+```{r}
+tourn_winner<-tennis %>%
+  group_by(tourney_id,tourney_name) %>%
+  summarise(winner=first(winner_name)) %>%
+  ungroup() %>%
+  count(winner,name="tourn_win") %>%
+  filter(tourn_win>1) %>%
+  arrange(desc(tourn_win))
+tourn_winner %>% nrow
+```
+
+The most winning players won 7 tournments.
+
+```{r}
+most_win<-tourn_winner %>%
+  first
+most_win
+```
+
+#### (c)
+
+$H_0:\mu_{w-ace}=\mu_{l-ace}$ $H_1:\mu_{w-ace}>\mu_{l-ace}$ Since p value\<0.05, we reject H0 under significance level 0.05,there is any evidence that winners have more aces than losers.
+
+```{r}
+aces<-tennis %>%
+  select(winner_name,loser_name,w_ace,l_ace) %>%
+  drop_na(w_ace,l_ace) %>%
+  summarize(
+    mean_diff=mean(w_ace)-mean(l_ace),
+    test_res=list(t.test(w_ace,l_ace,paired=TRUE,alternative = "greater"))
+  )
+p_value<-aces$test_res[[1]]$p.value
+print(p_value)
+```
+
+#### (d)
+Rafael Nadal has the highest win rate among the players who palyed at least 5 matches.
+```{r}
+highest_win_rate<-tennis %>%
+  select(winner_name,loser_name) %>%
+  pivot_longer(cols=c(winner_name,loser_name),
+               names_to='result',
+               values_to='player') %>%
+  mutate(win=ifelse(result=='winner_name',1,0)) %>%
+  group_by(player) %>%
+  summarise(total=n(),
+            win_time=sum(win),
+            win_rate=win_time/total) %>%
+  filter(total>=5) %>%
+  arrange(desc(win_rate)) %>%
+  first
+print(highest_win_rate)
+```
+
+## Problem 3
+
+#### (a)
+Daily cases vs. date
+```{r}
+dt<-read.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/refs/heads/master/rolling-averages/us-states.csv")
+dt$date<-as.Date(dt$date)
+with(dt,plot(cases~date))
+```
+Plot monthly cases against month.
+```{r}
+monthly_dt<-dt %>%
+  mutate(month=floor_date(date, "month")) %>%       
+  group_by(month) %>%
+  summarise(monthly_cases=sum(cases,na.rm = TRUE))
+with(monthly_dt,plot(monthly_cases~month))
+with(monthly_dt,lines(monthly_cases~month))
+```
+From the above plots we can conclude that there is 1 major spike and 3 minor spikes in cases.
+#### (b)
+Identify the states with the highest and lowest overall rates per population
+```{r}
+state_total_rate<-dt %>%
+  group_by(state) %>%
+  summarise(total_rate_per_pop=sum(cases_avg_per_100k,na.rm=TRUE))%>%
+  arrange(desc(total_rate_per_pop))
+high_state<-state_total_rate$state[1]
+low_state<-state_total_rate$state[nrow(state_total_rate)]
+cat("Highest:",high_state, "\nLowest:",low_state, "\n")
+```
+ Trajectories over time: Rhode Island fluctuates more obviously than Maine, Rhode Island also has a main spike, which is way higher than Maine.
+```{r}
+selected_states <- dt %>%
+  filter(state %in% c(high_state, low_state))
+ggplot(selected_states, aes(x=date,y=cases_avg_per_100k,color=state)) +
+  geom_line(size = 1) 
+```
+#### (c)
+The first five states to experience Covid in a substantial way are New York, New Jersey,
+Louisiana, Guam and Rhode Island.
+```{r}
+first_substantial<-dt %>%
+  filter(cases_avg_per_100k >= mean(cases_avg_per_100k)) %>% 
+  group_by(state) %>%
+  summarise(first_date = min(date,na.rm = TRUE)) %>%
+  arrange(first_date)
+head(first_substantial,5)
+```
