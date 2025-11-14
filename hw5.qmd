@@ -1,0 +1,319 @@
+---
+title: "Homework 5"
+format: pdf
+editor: visual
+---
+
+## Problem 1
+
+#### (a)
+
+###### 1.constructor
+
+```{r}
+setClass("waldCI",
+         slots = c(lb = 'numeric', 
+                   ub = 'numeric', 
+                   mean = 'numeric', 
+                   sterr = 'numeric', 
+                   level = 'numeric'))
+WaldCI<-function(lb=NULL,ub=NULL,mean=NULL,sterr=NULL,level){
+  if (!is.null(mean) && !is.null(sterr)) {
+    z <- .zval(level)
+    lb <- mean - z * sterr
+    ub <- mean + z * sterr
+  } else if (!is.null(lb) && !is.null(ub)) {
+    mean <- (lb + ub) / 2
+    z <- .zval(level)
+    sterr <- (ub - lb) / (2 * z)
+  } else {
+    stop("must specify either (mean, sterr) or (lb, ub).")
+  }
+  return(new("waldCI",lb=lb,ub=ub,mean=mean,sterr=sterr,level=level))
+}
+```
+
+###### 2.validator
+
+```{r}
+setValidity("waldCI", function(object){
+  if (object@sterr<0 && is.null(object@sterr)) {
+    stop("standard error should be positive")
+  }
+  if (object@ub<=object@lb){
+    stop("upper bound of CI should be greater than lower bound")
+  }
+  if (!is.finite(object@lb) || !is.finite(object@ub)){
+    stop("bounds must be finite.")
+  }
+  if (!is.numeric(object@level) || object@level<=0 || object@level>=1){
+    stop("level must be between 0 and 1")}
+  return(TRUE)
+})
+```
+
+###### 3.show method
+
+```{r}
+setMethod("show", "waldCI",
+  function(object) {
+    cat("Wald Confidence Interval (", object@level * 100, "%)\n", sep = "")
+    cat("Mean:", object@mean, "\n")
+    cat("SE:", object@sterr, "\n")
+    cat("CI: (", object@lb, ", ", object@ub, ")\n", sep = "")
+    return(invisible(object))
+    }
+)
+```
+
+###### 4.accessors
+
+```{r}
+setGeneric("lb", function(object) standardGeneric("lb"))
+setGeneric("ub", function(object) standardGeneric("ub"))
+setGeneric("mean", function(object) standardGeneric("mean"))
+setGeneric("sterr", function(object) standardGeneric("sterr"))
+setGeneric("level", function(object) standardGeneric("level"))
+setMethod("lb", "waldCI", function(object) object@lb)
+setMethod("ub", "waldCI", function(object) object@ub)
+setMethod("mean", "waldCI", function(object) object@mean)
+setMethod("sterr", "waldCI", function(object) object@sterr)
+setMethod("level", "waldCI", function(object) object@level)
+```
+
+###### 5.setters
+
+```{r}
+setGeneric("lb<-", function(object,value) standardGeneric("lb<-"))
+setGeneric("ub<-", function(object,value) standardGeneric("ub<-"))
+setGeneric("mean<-", function(object,value) standardGeneric("mean<-"))
+setGeneric("sterr<-", function(object,value) standardGeneric("sterr<-"))
+setGeneric("level<-", function(object,value) standardGeneric("level<-"))
+setMethod("lb<-", "waldCI", function(object,value){
+  object@lb<-value
+  validObject(object)
+  return(object)
+} )
+setMethod("ub<-", "waldCI", function(object,value){
+  object@ub<-value
+  validObject(object)
+  return(object)
+})
+setMethod("mean<-", "waldCI", function(object,value){ 
+  object@mean<-value
+  validObject(object)
+  return(object)
+})
+setMethod("sterr<-", "waldCI", function(object,value){
+  object@sterr<-value
+  validObject(object)
+  return(object)
+} )
+setMethod("level<-", "waldCI", function(object,value){
+  object@level<-value
+  validObject(object)
+  return(object)
+})
+```
+
+###### 6.contains
+
+```{r}
+setGeneric("contains", function(object, value) standardGeneric("contains"))
+setMethod("contains", "waldCI", function(object, value){
+  return(value >= object@lb && value <= object@ub)
+})
+```
+
+###### 7.overlap
+
+```{r}
+setGeneric("overlap", function(ci1, ci2) standardGeneric("overlap"))
+setMethod("overlap", "waldCI", function(ci1, ci2){
+  return(!(ci1@ub<ci2@lb || ci2@ub<ci1@lb))
+})
+```
+
+###### 8.as.numeric
+
+```{r}
+setMethod("as.numeric","waldCI",function(x) c(x@lb,x@ub))
+```
+
+###### 9.transformCI
+
+```{r}
+setGeneric("transformCI",function(ci,f) standardGeneric("transformCI"))
+setMethod("transformCI", "waldCI", function(ci,f) {
+  warning("Only monotonic functions make sense.")
+  new_lb<-f(ci@lb)
+  new_ub<-f(ci@ub)
+  WaldCI(level=ci@level,lb=new_lb,ub=new_ub)
+})
+```
+
+#### (b)
+
+```{r}
+ci1<-WaldCI(level=0.95,lb=17.2,ub=24.7)
+ci2<-WaldCI(level=0.99,mean=13,sterr=2.5)
+ci3<-WaldCI(level=0.75,lb=27.43,ub=39.22)
+```
+
+```{r}
+ci1
+ci2
+ci3
+as.numeric(ci1)
+as.numeric(ci2)
+as.numeric(ci3)
+lb(ci2)
+ub(ci2)
+mean(ci1)
+sterr(ci3)
+level(ci2)
+lb(ci2) <- 10.5
+mean(ci3) <- 34
+level(ci3) <- .8
+contains(ci1, 17)
+contains(ci3, 44)
+overlap(ci1, ci2)
+eci1 <- transformCI(ci1, sqrt)
+eci1
+mean(transformCI(ci2, log))
+```
+
+#### (c)
+
+##### 1.negative standard error
+
+```{r}
+try(WaldCI(level = 0.95, mean = 10, sterr = -3))
+```
+
+##### 2.lb \> ub
+
+```{r}
+try(WaldCI(level = 0.95, ub=5,lb=10))
+```
+
+##### 3.Infinite bounds
+
+```{r}
+try(WaldCI(level = 0.95, ub=Inf,lb=10))
+```
+
+##### 4.invalid use of the setters
+
+```{r}
+ci<- ci1
+try(lb(ci) <- 30)
+```
+
+## Problem 3
+
+#### (a)
+
+There are 5 major spikes and 2 minor spikes.
+
+```{r}
+library(plotly)
+dt<-read.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/refs/heads/master/rolling-averages/us-states.csv")
+dt$date<-as.Date(dt$date)
+p <- plot_ly(dt, x = ~ date, y = ~ cases, 
+             mode = "lines")
+```
+
+```{r}
+p
+```
+
+#### (b)
+
+```{r}
+library(tidyverse)
+state_total_rate<-dt %>%
+  group_by(state) %>%
+  summarise(total_rate_per_pop=sum(cases_avg_per_100k,na.rm=TRUE))%>%
+  arrange(desc(total_rate_per_pop))
+high_state<-state_total_rate$state[1]
+low_state<-state_total_rate$state[nrow(state_total_rate)]
+cat("Highest:",high_state, "\nLowest:",low_state, "\n")
+```
+
+Trajectories over time: Rhode Island fluctuates more obviously than Maine, Rhode Island also has a main spike, which is way higher than Maine.
+
+```{r}
+selected_states <- dt %>%
+  filter(state %in% c(high_state, low_state))
+#ggplot(selected_states, aes(x=date,y=cases_avg_per_100k,color=state)) +
+  #geom_line(size = 1) 
+plot_ly(data=selected_states,x=~date,y=~cases_avg_per_100k,
+  color=~state,
+  type='scatter',
+  mode='lines',
+  line=list(width = 1))
+```
+
+#### (c)
+
+The five states which encountered the first spike is what we're looking for.
+
+```{r}
+dt20 <- dt %>%
+  filter(year(date) == 2020) %>%
+  select(state, date, cases_avg_per_100k)
+```
+
+```{r}
+plot_ly(
+  data = dt20,
+  x = ~date,
+  y = ~cases_avg_per_100k,
+  color = ~state,
+  type = "scatter",
+  mode = "lines"
+) %>%
+  layout(
+    yaxis = list(title = "COVID cases per 100k"),
+    showlegend = FALSE
+  )
+```
+
+The first spike may happen around March to May.
+
+```{r}
+dt20 <- dt20 %>%
+  filter(month(date) %in% c(3, 4, 5)) 
+plot_ly(
+  data = dt20,
+  x = ~date,
+  y = ~cases_avg_per_100k,
+  color = ~state,
+  type = "scatter",
+  mode = "lines"
+) %>%
+  layout(
+    yaxis = list(title = "COVID cases per 100k")
+  )
+```
+
+Take a closer look.
+
+```{r}
+dt20<-dt20 %>%
+   filter(cases_avg_per_100k > 20)
+plot_ly(
+  data = dt20,
+  x = ~date,
+  y = ~cases_avg_per_100k,
+  color = ~state,
+  type = "scatter",
+  mode = "lines"
+) %>%
+  layout(
+    yaxis = list(title = "COVID cases per 100k")
+  )
+```
+
+The first five states to experience Covid in a substantial way are New York, New Jersey, Guam, Louisana and Rhode Island.
