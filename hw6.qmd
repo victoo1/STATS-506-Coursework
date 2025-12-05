@@ -1,0 +1,449 @@
+---
+title: "Homework 6"
+format: pdf
+editor: visual
+---
+
+## Problem 1
+
+Here is the C function, and I use the scaling factor 1/n.
+
+```{r}
+library(Rcpp)
+cppFunction("
+double C_moment(NumericVector v, int k) {
+  int n = v.length();
+  double mean = 0.0;
+  for (int i = 0; i < n; ++i) {
+    mean += v[i];
+  }
+  mean /= n;
+  double mmt = 0.0;
+  for (int i = 0; i < n; ++i) {
+    mmt += pow(v[i] - mean, k);
+  }
+  return mmt / n;
+}")
+
+```
+
+Comparing the result of C_moment and R function moment(), the results are the same.
+
+```{r}
+library(e1071)
+set.seed(123)
+x <- rnorm(100)   
+k <- 3            
+C_moment(x, k)
+moment(x, order = k, center = TRUE, absolute = FALSE)
+```
+
+## Problem 2
+
+#### a.
+
+Define the class: waldci.R is adapted from homework5 solution.
+
+```{r}
+source("waldci.R")
+setClass(
+  "bootstrapWaldCI",
+  contains = "waldCI",
+  slots = list(
+    data = "ANY",
+    fun = "function",
+    reps = "numeric",
+    bootEstimates = "numeric",
+    compute = "character"))
+```
+
+Bootstrap simulation:
+
+```{r}
+#' Perform a Single Bootstrap Resample
+#'
+#' @param data A data frame or matrix.
+#' @param fun A function that takes the resampled data and returns
+#'   a numeric estimate.
+#' @return A single numeric value.
+.bootstrap_once <- function(data, fun) {
+  n <- nrow(data)
+  idx <- sample(seq_len(n), replace = TRUE)
+  fun(data[idx, , drop = FALSE])
+}
+
+#' Run Bootstrap Simulation
+#'
+#' @param data A data frame or matrix.
+#' @param fun A function to compute an estimate for each resample.
+#' @param reps Number of bootstrap repetitions.
+#' @param compute Character string: "serial" or "parallel".
+#' @return A numeric vector of bootstrap estimates.
+.run_bootstrap <- function(data, fun, reps, compute) {
+  if (compute == "serial") {
+    return(sapply(seq_len(reps),
+                  function(i) .bootstrap_once(data, fun)))
+} else if (compute == "parallel") {
+    library(parallel)
+    ncore <- max(1, detectCores() - 1)
+    cl <- makeCluster(ncore)
+    clusterExport(cl,
+                  c("data", "fun", ".bootstrap_once"),
+                  envir = environment())
+    out <- parSapply(cl,
+                     seq_len(reps),
+                     function(i) .bootstrap_once(data, fun))
+    stopCluster(cl)
+    return(out)
+  }
+  stop("compute must be 'serial' or 'parallel'")
+}
+```
+
+Constructor:
+
+```{r}
+#' Construct a Bootstrap-Based Wald Confidence Interval
+#' @param fun A function applied to each resampled dataset.
+#' @param data A data frame or matrix to be resampled.
+#' @param reps Number of bootstrap repetitions (default: 1000).
+#' @param level Confidence level for the Wald interval (default: 0.95).
+#' @param compute Computation mode: "serial" or "parallel".
+#' @return An object of class bootstrapWaldCI.
+#' @export
+makeBootstrapCI <- function(fun,
+                            data,
+                            reps = 1000,
+                            level = 0.95,
+                            compute = c("serial", "parallel")) {
+  compute <- match.arg(compute)
+  bootVals <- .run_bootstrap(data, fun, reps, compute)
+  est <- mean(bootVals)
+  se  <- sd(bootVals)
+  base <- makeCI(level = level, mean = est, sterr = se)
+  new("bootstrapWaldCI",
+      base,
+      data = data,
+      fun = fun,
+      reps = reps,
+      bootEstimates = bootVals,
+      compute = compute)
+}
+```
+
+rebootstrap:
+
+```{r}
+#' Re-run the Bootstrap Procedure
+#' @param object A bootstrapWaldCI object.
+#' @return The updated bootstrapWaldCI object.
+#' @export
+setGeneric("rebootstrap",
+           function(object) standardGeneric("rebootstrap"))
+
+#' @rdname rebootstrap
+#' @export
+setMethod(
+  "rebootstrap",
+  signature = "bootstrapWaldCI",
+  definition = function(object) {
+    bootVals <- .run_bootstrap(
+      object@data,
+      object@fun,
+      object@reps,
+      object@compute
+    )
+    object@bootEstimates <- bootVals
+    object@mean  <- mean(bootVals)
+    object@sterr <- sd(bootVals)
+    validObject(object)
+    return(object)
+  }
+)
+```
+
+#### b.
+
+By running the code below, we confirm that our code does work.
+
+```{r}
+ci1 <- makeBootstrapCI(function(x) mean(x$y),
+                       ggplot2::diamonds,
+                       reps = 1000)
+ci1
+rebootstrap(ci1)
+```
+
+Compare two compute methods serial:
+
+```{r}
+system.time(makeBootstrapCI(function(x) mean(x$y),
+                            ggplot2::diamonds,
+                            reps = 2000,
+                            compute = "serial"))
+```
+
+parallel:
+
+```{r}
+system.time(makeBootstrapCI(function(x) mean(x$y),
+                            ggplot2::diamonds,
+                            reps = 2000,
+                            compute = "parallel"))
+```
+
+As it shows, parallel process for this question spends significantly shorter time on user than serial process, but spend slightly longer time on system. The elapsed time for parallel is slightly shorter than serial.
+
+#### c.
+
+Define function dispCoef():
+
+```{r}
+#' Extract the Coefficient of `disp` from a Linear Model
+#' @param df A data frame
+#' @return A numeric value 
+dispCoef <- function(df) {
+  fit <- lm(mpg ~ cyl + disp + wt, data = df)
+  coef(fit)[["disp"]]   # return the coefficient for disp
+}
+```
+
+Test:
+
+```{r}
+ci2 <- makeBootstrapCI(dispCoef,
+                       mtcars,
+                       reps = 1000)
+ci2
+rebootstrap(ci2)
+```
+
+Compare two compute methods
+
+```{r}
+system.time(
+  makeBootstrapCI(dispCoef, mtcars, reps = 2000, compute = "serial")
+)
+```
+
+```{r}
+system.time(
+  makeBootstrapCI(dispCoef, mtcars, reps = 2000, compute = "parallel")
+)
+```
+
+As it shows, parallel process for this question spends shorter time on user than serial process, but spend longer time on system. The elapsed time for parallel is longer than serial.
+
+## Problem 3
+
+#### (a)
+
+```{r}
+library(data.table)
+library(lme4)
+library(parallel)
+library(ggplot2)
+df <- readRDS("simdata.rds")
+setDT(df)
+predictors <- c("prior_gpa", "forum_posts", "quiz_attempts")
+df[, (predictors) := lapply(.SD, function(x) (x - mean(x))/sd(x)), 
+   by = country, .SDcols = predictors]
+#' Fit a Mixed-Effects Logistic Regression Model and Record Running Time
+#' @param subdata A data.framedata.table
+#' @return A list 
+fit_model_time <- function(subdata) {
+  if (nrow(subdata) == 0) return(list(coef = NA, time = NA))
+  
+  start_time <- Sys.time()
+  
+  model <- tryCatch(
+    glmer(completed_course ~ prior_gpa + forum_posts + quiz_attempts + (1 | device_type),
+          data = subdata,
+          family = binomial,
+          control = glmerControl(optimizer = "bobyqa")),
+    error = function(e) return(NULL)
+  )
+  
+  end_time <- Sys.time()
+  
+  if (is.null(model)) {
+    return(list(coef = NA, time = NA))
+  } else {
+    coef_forum <- coef(summary(model))["forum_posts","Estimate"]
+    runtime <- as.numeric(difftime(end_time, start_time, units = "secs"))
+    return(list(coef = coef_forum, time = runtime))
+  }
+}
+
+country_list <- split(df, df$country)
+n_cores <- detectCores() - 1
+cl <- makeCluster(n_cores)
+clusterExport(cl, c("fit_model_time", "country_list"))
+clusterEvalQ(cl, library(lme4))
+
+system_time_total <- system.time({
+  results <- parLapply(cl, country_list, fit_model_time)
+})
+stopCluster(cl)
+forum_coef <- sapply(results, function(x) x$coef)
+runtime_sec <- sapply(results, function(x) x$time)
+
+coef_df <- data.frame(
+  country = names(country_list),
+  forum_coef = forum_coef,
+  runtime_sec = runtime_sec
+)
+```
+
+```{r}
+print(coef_df)
+```
+
+```{r}
+print(system_time_total)
+```
+
+```{r}
+ggplot(coef_df, aes(x = country, y = forum_coef)) +
+  geom_col(fill = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Estimated Coefficients for Forum Posts by Country",
+    y = "Coefficient",
+    x = "Country"
+  )
+```
+
+#### (b)
+
+```{r}
+df <- readRDS("simdata.rds")
+setDT(df)
+vars <- c("completed_course", "prior_gpa", "forum_posts", "quiz_attempts", "device_type", "country")
+df_sub <- df[, ..vars]
+predictors <- c("prior_gpa", "forum_posts", "quiz_attempts")
+df_sub[, (predictors) := lapply(.SD, function(x) (x - mean(x))/sd(x)),
+       by = country, .SDcols = predictors]
+country_list <- split(df_sub, df_sub$country)
+#' Fit a Mixed-Effects Logistic Regression Model and Record Running Time
+#' @param subdata A data.framedata.table
+#' @return A list 
+fit_model_time <- function(subdata) {
+  if (nrow(subdata) == 0) return(list(coef = NA, time = NA))
+  
+  start_time <- Sys.time()
+  
+  model <- tryCatch(
+    glmer(completed_course ~ prior_gpa + forum_posts + quiz_attempts + (1 | device_type),
+          data = subdata,
+          family = binomial,
+          control = glmerControl(optimizer = "bobyqa")),
+    error = function(e) return(NULL)
+  )
+  
+  end_time <- Sys.time()
+  
+  if (is.null(model)) {
+    return(list(coef = NA, time = NA))
+  } else {
+    coef_forum <- coef(summary(model))["forum_posts", "Estimate"]
+    runtime <- as.numeric(difftime(end_time, start_time, units = "secs"))
+    return(list(coef = coef_forum, time = runtime))
+  }
+}
+n_cores <- detectCores() - 1
+cl <- makeCluster(n_cores)
+clusterExport(cl, c("fit_model_time", "country_list"))
+clusterEvalQ(cl, library(lme4))
+system_time_total <- system.time({
+  results <- parLapply(cl, country_list, fit_model_time)
+})
+stopCluster(cl)
+forum_coef <- sapply(results, function(x) x$coef)
+runtime_sec <- sapply(results, function(x) x$time)
+
+coef_df <- data.frame(
+  country = names(country_list),
+  forum_coef = forum_coef,
+  runtime_sec = runtime_sec
+)
+```
+
+```{r}
+print(coef_df)
+```
+
+```{r}
+system_time_total
+```
+
+forum_coef is the same as in (a)
+
+## Problem 4
+
+#### (a)
+
+Load data
+
+```{r}
+library(data.table)
+tennis = fread("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2019.csv")
+```
+
+69 tournaments took place in 2019.
+
+```{r}
+tourneys <- unique(tennis[, .(tourney_name)])
+tourneys[, tourney_name := str_replace(tourney_name, "Davis.*", "Davis Cup")]
+unique_tourneys <- unique(tourneys, by = "tourney_name")
+n_tourneys <- nrow(unique_tourneys)
+n_tourneys
+```
+
+#### (b)
+
+17 players won more than 1 tournaments.
+
+```{r}
+library(data.table)
+setorder(tennis, tourney_name, -match_num)
+finals <- tennis[, .SD[1], by = tourney_name]
+winner_counts <- finals[, .(wins = .N), by = winner_name]
+multiwinners <- winner_counts[wins > 1][order(-wins)]
+nrow(multiwinners)
+```
+
+Rafael Nadal won the most, at 9 tournments
+
+```{r}
+multiwinners[1]
+```
+
+#### (c)
+
+There is significant evidence that winners have more aces than losers.
+
+```{r}
+dt <- tennis[!is.na(w_ace) & !is.na(l_ace)] 
+dt[, win_more := w_ace > l_ace]
+n_wins <- sum(dt$win_more)
+n_total <- nrow(dt)
+prop.test(x = n_wins, n = n_total, p = 0.5)
+```
+
+#### (d)
+
+Rafael has the highest win rate
+
+```{r}
+long_dt <- rbind(
+  tennis[, .(player = winner_name, winner = TRUE)],
+  tennis[, .(player = loser_name,  winner = FALSE)]
+)
+player_stats <- long_dt[, .(
+  matches = .N,
+  winrate = mean(winner)
+), by = player]
+player_stats <- player_stats[matches > 5]
+player_stats[order(-winrate)][1,1]
+```
